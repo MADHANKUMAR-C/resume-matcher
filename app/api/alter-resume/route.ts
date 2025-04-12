@@ -60,7 +60,7 @@ ${parsedResume}
     console.error("Error in alter-resume route:", error)
     return NextResponse.json(
       { error: error.message || "Internal error. Ensure Gemini API key is valid." },
-      { status: 500 }
+      { status: 500 },
     )
   }
 }
