@@ -1,101 +1,119 @@
-import type { NextRequest } from "next/server"
-import { NextResponse } from "next/server"
+import { type NextRequest, NextResponse } from "next/server"
+import { parseResume, parseJobDescription } from "@/lib/resume-parser"
+import { checkOllamaStatus } from "@/lib/check-ollama"
+import pdfParse from "pdf-parse"
 
 export async function POST(req: NextRequest) {
-  console.log("Alter resume API called")
-
   try {
-    // Verify API key is available first
-    const apiKey = process.env.GOOGLE_API_KEY
-    if (!apiKey) {
-      console.error("GOOGLE_API_KEY is not defined")
-      return NextResponse.json(
-        {
-          error: "API key is not configured",
-          details: "The GOOGLE_API_KEY environment variable is not set.",
-        },
-        { status: 400 },
-      )
-    }
-
-    // Parse form data
-    let formData
-    try {
-      formData = await req.formData()
-      console.log("FormData received")
-    } catch (formError: any) {
-      console.error("Error parsing form data:", formError)
-      return NextResponse.json(
-        {
-          error: "Failed to parse form data",
-          details: formError.message || "There was an error processing your request.",
-        },
-        { status: 400 },
-      )
-    }
-
-    const resumeFile = formData.get("resume") as File | null
-    const jobDescription = formData.get("jobDescription") as string | null
-
-    console.log("Resume file:", resumeFile?.name || "No file")
-    console.log("Job description length:", jobDescription?.length || 0)
+    const formData = await req.formData()
+    const resumeFile = formData.get("resume") as File
+    const jobDescription = formData.get("jobDescription") as string
 
     if (!resumeFile || !jobDescription) {
+      return NextResponse.json({ error: "Resume file and job description are required" }, { status: 400 })
+    }
+
+    const arrayBuffer = await resumeFile.arrayBuffer()
+    const buffer = Buffer.from(arrayBuffer)
+
+    const parsed = await pdfParse(buffer)
+    const resumeText = parsed.text
+
+    const ollamaStatus = await checkOllamaStatus()
+    if (!ollamaStatus.running || !ollamaStatus.modelLoaded) {
       return NextResponse.json(
-        {
-          error: "Resume file and job description are required",
-        },
-        { status: 400 },
+        { error: ollamaStatus.error || "Ollama is not running or no suitable model is available" },
+        { status: 500 },
       )
     }
 
-    // Return a mock altered resume for testing
-    const mockAlteredResume = `
-JOHN DOE
-Software Engineer
-john.doe@example.com | (123) 456-7890 | linkedin.com/in/johndoe | github.com/johndoe
+    const modelName = ollamaStatus.selectedModel?.name || "phi"
+    console.log(`Using model: ${modelName}`)
 
-SUMMARY
-Experienced Software Engineer with 5+ years of expertise in JavaScript, React, and Next.js. Passionate about creating responsive, user-friendly web applications with a focus on performance and accessibility.
+    const parsedResume = parseResume(resumeText, false)
+    const parsedJobDescription = parseJobDescription(jobDescription, false)
 
-SKILLS
-• Frontend: React, Next.js, TypeScript, HTML5, CSS3, Tailwind CSS
-• Backend: Node.js, Express, RESTful APIs
-• Tools: Git, GitHub, VS Code, Webpack, Jest
-• Concepts: Responsive Design, Accessibility, Performance Optimization
+    // Build prompt for resume alteration
+    const prompt = `
+You are an expert resume writer with years of experience helping job seekers optimize their resumes for specific job descriptions.
 
-EXPERIENCE
-Senior Frontend Developer | TechCorp Inc. | Jan 2021 - Present
-• Led development of company's flagship SaaS product using React and Next.js
-• Improved application performance by 40% through code optimization and lazy loading
-• Implemented comprehensive testing strategy using Jest and React Testing Library
-• Mentored junior developers and conducted code reviews
+TASK: Rewrite the provided resume to better match the job description while maintaining truthfulness.
 
-Frontend Engineer | WebSolutions LLC | Mar 2018 - Dec 2020
-• Developed responsive web applications using React and TypeScript
-• Collaborated with UX/UI designers to implement pixel-perfect interfaces
-• Built reusable component library that reduced development time by 30%
-• Integrated third-party APIs and services
+INSTRUCTIONS:
+1. Analyze the job description to identify key skills, qualifications, and responsibilities.
+2. Restructure and reword the resume to highlight relevant experience and skills that match the job description.
+3. Use industry-standard terminology and action verbs.
+4. Maintain the same basic structure (sections like Education, Experience, Skills, etc.).
+5. Do NOT invent new experiences or qualifications - only reword and reorganize existing information.
+6. Focus on making the resume ATS-friendly by incorporating relevant keywords from the job description.
+7. Format the resume in a clean, professional layout.
 
-EDUCATION
-Bachelor of Science in Computer Science
-University of Technology | Graduated: May 2018
-    `
+IMPORTANT: Your response should ONLY contain the rewritten resume text. Do not include any explanations, notes, or commentary.
 
-    return NextResponse.json({ alteredResume: mockAlteredResume })
+JOB DESCRIPTION:
+${parsedJobDescription}
+
+ORIGINAL RESUME:
+${parsedResume}
+`.trim()
+
+    console.log("Sending resume alteration request to Ollama API...")
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 600000) // 10 minutes timeout
+
+    try {
+      const response = await fetch("http://localhost:11434/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: modelName,
+          messages: [{ role: "user", content: prompt }],
+          stream: false,
+          options: {
+            temperature: 0.2,
+            top_p: 0.9,
+            num_predict: 4000, // Increased for longer response
+          },
+        }),
+        signal: controller.signal,
+      })
+
+      clearTimeout(timeoutId)
+
+      if (!response.ok) {
+        const error = await response.text()
+        throw new Error(`Ollama API error: ${error}`)
+      }
+
+      const data = await response.json()
+      const alteredResume = data.message.content.trim()
+
+      return NextResponse.json({ alteredResume })
+    } catch (error: any) {
+      clearTimeout(timeoutId)
+
+      if (error.name === "AbortError") {
+        console.error("Request to Ollama timed out")
+        return NextResponse.json(
+          { error: "Resume alteration timed out. Try again with shorter resume or job description." },
+          { status: 504 },
+        )
+      }
+
+      throw error
+    }
   } catch (error: any) {
-    // Global catch-all error handler
-    console.error("CRITICAL ERROR in alter-resume route:", error)
-
-    // Always return a valid JSON response
+    console.error("Error in alter-resume route:", error)
     return NextResponse.json(
-      {
-        error: "Internal server error",
-        details: error.message || "An unexpected error occurred.",
-      },
+      { error: error.message || "Internal error. Ensure Ollama is running with a proper model." },
       { status: 500 },
     )
   }
 }
 
-export const dynamic = "force-dynamic"
+export const config = {
+  api: {
+    bodyParser: false,
+  },
+}
