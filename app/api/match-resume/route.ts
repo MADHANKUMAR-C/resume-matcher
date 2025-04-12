@@ -3,11 +3,46 @@ import { parseJobDescription } from "@/lib/resume-parser"
 import pdfParse from "pdf-parse"
 import { GoogleGenerativeAI } from "@google/generative-ai"
 
+// Add OPTIONS handler to respond to preflight requests
+export async function OPTIONS(req: NextRequest) {
+  return new Response(null, {
+    status: 200,
+    headers: {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    },
+  });
+}
+
 export async function POST(req: NextRequest) {
+  // Log the request method and headers for debugging
+  console.log("Request method:", req.method);
+  console.log("Request headers:", Object.fromEntries(req.headers.entries()));
+  
   try {
-    const formData = await req.formData()
-    const resumeFile = formData.get("resume") as File
-    const jobDescription = formData.get("jobDescription") as string
+    // Check content type
+    const contentType = req.headers.get('content-type') || '';
+    console.log("Content-Type:", contentType);
+    
+    if (!contentType.includes('multipart/form-data') && !contentType.includes('application/x-www-form-urlencoded')) {
+      console.log("Invalid content type for FormData request");
+    }
+    
+    let formData;
+    try {
+      formData = await req.formData();
+      console.log("FormData parsed successfully");
+    } catch (error) {
+      console.error("Error parsing FormData:", error);
+      return NextResponse.json({ error: "Failed to parse form data" }, { status: 400 });
+    }
+    
+    const resumeFile = formData.get("resume") as File;
+    const jobDescription = formData.get("jobDescription") as string;
+
+    console.log("Resume file received:", resumeFile ? resumeFile.name : "No file");
+    console.log("Job description length:", jobDescription ? jobDescription.length : 0);
 
     if (!resumeFile) {
       return NextResponse.json({ error: "Resume file is required" }, { status: 400 })
@@ -193,7 +228,14 @@ ${resumeText}
         modelUsed: "gemini-1.5-flash",
       }
 
-      return NextResponse.json(finalResult)
+      // Return with CORS headers
+      return NextResponse.json(finalResult, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        }
+      });
     } catch (error: any) {
       console.error("Error parsing Gemini response:", error)
       console.log("Raw response:", content)
@@ -211,13 +253,29 @@ ${resumeText}
         parsingError: true,
       }
 
-      return NextResponse.json(fallbackResult)
+      // Return with CORS headers
+      return NextResponse.json(fallbackResult, {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        }
+      });
     }
   } catch (error: any) {
     console.error("Error in match-resume route:", error)
+    
+    // Return with CORS headers
     return NextResponse.json(
       { error: error.message || "Internal error. Ensure Gemini API key is valid." },
-      { status: 500 },
+      { 
+        status: 500,
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        }
+      }
     )
   }
 }
