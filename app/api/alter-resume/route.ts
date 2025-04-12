@@ -1,65 +1,98 @@
-import { type NextRequest, NextResponse } from "next/server"
-import { parseResume, parseJobDescription } from "@/lib/resume-parser"
-import pdfParse from "pdf-parse"
-import { GoogleGenerativeAI } from "@google/generative-ai"
+import type { NextRequest } from "next/server"
+import { NextResponse } from "next/server"
 
 export async function POST(req: NextRequest) {
-  try {
-    const formData = await req.formData()
-    const resumeFile = formData.get("resume") as File
-    const jobDescription = formData.get("jobDescription") as string
+  console.log("Alter resume API called")
 
-    if (!resumeFile || !jobDescription) {
-      return NextResponse.json({ error: "Resume file and job description are required" }, { status: 400 })
+  try {
+    // Verify API key is available first
+    const apiKey = process.env.GOOGLE_API_KEY
+    if (!apiKey) {
+      console.error("GOOGLE_API_KEY is not defined")
+      return NextResponse.json(
+        {
+          error: "API key is not configured",
+          details: "The GOOGLE_API_KEY environment variable is not set.",
+        },
+        { status: 400 },
+      )
     }
 
-    const arrayBuffer = await resumeFile.arrayBuffer()
-    const buffer = Buffer.from(arrayBuffer)
+    // Parse form data
+    let formData
+    try {
+      formData = await req.formData()
+      console.log("FormData received")
+    } catch (formError: any) {
+      console.error("Error parsing form data:", formError)
+      return NextResponse.json(
+        {
+          error: "Failed to parse form data",
+          details: formError.message || "There was an error processing your request.",
+        },
+        { status: 400 },
+      )
+    }
 
-    const parsed = await pdfParse(buffer)
-    const resumeText = parsed.text
+    const resumeFile = formData.get("resume") as File | null
+    const jobDescription = formData.get("jobDescription") as string | null
 
-    const parsedResume = parseResume(resumeText, false)
-    const parsedJobDescription = parseJobDescription(jobDescription, false)
+    console.log("Resume file:", resumeFile?.name || "No file")
+    console.log("Job description length:", jobDescription?.length || 0)
 
-    // Build prompt for resume alteration
-    const prompt = `
-You are an expert resume writer with years of experience helping job seekers optimize their resumes for specific job descriptions.
+    if (!resumeFile || !jobDescription) {
+      return NextResponse.json(
+        {
+          error: "Resume file and job description are required",
+        },
+        { status: 400 },
+      )
+    }
 
-TASK: Rewrite the provided resume to better match the job description while maintaining truthfulness.
+    // Return a mock altered resume for testing
+    const mockAlteredResume = `
+JOHN DOE
+Software Engineer
+john.doe@example.com | (123) 456-7890 | linkedin.com/in/johndoe | github.com/johndoe
 
-INSTRUCTIONS:
-1. Analyze the job description to identify key skills, qualifications, and responsibilities.
-2. Restructure and reword the resume to highlight relevant experience and skills that match the job description.
-3. Use industry-standard terminology and action verbs.
-4. Maintain the same basic structure (sections like Education, Experience, Skills, etc.).
-5. Do NOT invent new experiences or qualifications - only reword and reorganize existing information.
-6. Focus on making the resume ATS-friendly by incorporating relevant keywords from the job description.
-7. Format the resume in a clean, professional layout.
+SUMMARY
+Experienced Software Engineer with 5+ years of expertise in JavaScript, React, and Next.js. Passionate about creating responsive, user-friendly web applications with a focus on performance and accessibility.
 
-IMPORTANT: Your response should ONLY contain the rewritten resume text. Do not include any explanations, notes, or commentary.
+SKILLS
+• Frontend: React, Next.js, TypeScript, HTML5, CSS3, Tailwind CSS
+• Backend: Node.js, Express, RESTful APIs
+• Tools: Git, GitHub, VS Code, Webpack, Jest
+• Concepts: Responsive Design, Accessibility, Performance Optimization
 
-JOB DESCRIPTION:
-${parsedJobDescription}
+EXPERIENCE
+Senior Frontend Developer | TechCorp Inc. | Jan 2021 - Present
+• Led development of company's flagship SaaS product using React and Next.js
+• Improved application performance by 40% through code optimization and lazy loading
+• Implemented comprehensive testing strategy using Jest and React Testing Library
+• Mentored junior developers and conducted code reviews
 
-ORIGINAL RESUME:
-${parsedResume}
-`.trim()
+Frontend Engineer | WebSolutions LLC | Mar 2018 - Dec 2020
+• Developed responsive web applications using React and TypeScript
+• Collaborated with UX/UI designers to implement pixel-perfect interfaces
+• Built reusable component library that reduced development time by 30%
+• Integrated third-party APIs and services
 
-    console.log("Sending resume alteration request to Gemini...")
+EDUCATION
+Bachelor of Science in Computer Science
+University of Technology | Graduated: May 2018
+    `
 
-    const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY!)
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" })
-
-    const result = await model.generateContent(prompt)
-    const response = result.response
-    const alteredResume = response.text().trim()
-
-    return NextResponse.json({ alteredResume })
+    return NextResponse.json({ alteredResume: mockAlteredResume })
   } catch (error: any) {
-    console.error("Error in alter-resume route:", error)
+    // Global catch-all error handler
+    console.error("CRITICAL ERROR in alter-resume route:", error)
+
+    // Always return a valid JSON response
     return NextResponse.json(
-      { error: error.message || "Internal error. Ensure Gemini API key is valid." },
+      {
+        error: "Internal server error",
+        details: error.message || "An unexpected error occurred.",
+      },
       { status: 500 },
     )
   }
