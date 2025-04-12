@@ -65,8 +65,4 @@ ${parsedResume}
   }
 }
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-}
+export const dynamic = "force-dynamic"
