@@ -124,6 +124,7 @@ export function ResumeMatcher() {
 
       const response = await fetch("/api/match-resume", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: formData,
         signal: controller.signal,
       })
