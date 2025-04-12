@@ -1,6 +1,6 @@
 import { OllamaStatus } from "@/components/ollama-status"
 import { ResumeMatcher } from "@/components/resume-matcher"
-import { GeminiChat } from "@/components/GeminiChat" // <-- new import
+import { GeminiChat } from "@/components/GeminiChat"
 
 export default function Home() {
   return (
@@ -11,7 +11,7 @@ export default function Home() {
       </p>
       <OllamaStatus />
       <ResumeMatcher />
-      <GeminiChat /> {/* <-- render Gemini chatbot */}
+      <GeminiChat />
     </main>
   )
 }
