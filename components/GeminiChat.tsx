@@ -1,5 +1,7 @@
 "use client"
 
+import type React from "react"
+
 import { useState } from "react"
 import { SendHorizonal, Bot } from "lucide-react"
 
@@ -48,16 +50,15 @@ export function GeminiChat() {
           <div className="flex-1 overflow-y-auto p-3 space-y-2 text-sm">
             {messages.map((msg, i) => (
               <div
-              key={i}
-              className={`p-2 rounded-lg max-w-[90%] ${msg.role === "user" ? "text-right ml-auto" : "mr-auto"}`}
-              style={{
-                backgroundColor: msg.role === "user" ? "#DCF8C6" : "#E6ECF0", // Green & soft gray
-                color: "#1a1a1a",
-              }}
-            >
-              <span>{msg.text}</span>
-            </div>
-            
+                key={i}
+                className={`p-2 rounded-lg max-w-[90%] ${msg.role === "user" ? "text-right ml-auto" : "mr-auto"}`}
+                style={{
+                  backgroundColor: msg.role === "user" ? "#DCF8C6" : "#E6ECF0", // Green & soft gray
+                  color: "#1a1a1a",
+                }}
+              >
+                <span>{msg.text}</span>
+              </div>
             ))}
           </div>
           <form onSubmit={sendMessage} className="flex border-t p-2 gap-2">
@@ -68,10 +69,7 @@ export function GeminiChat() {
               className="flex-1 p-2 border rounded-md text-sm"
               placeholder="Ask SkillZilla..."
             />
-            <button
-              type="submit"
-              className="bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-white-700"
-            >
+            <button type="submit" className="bg-blue-600 text-white px-3 py-2 rounded-md hover:bg-blue-700">
               <SendHorizonal size={16} />
             </button>
           </form>
@@ -80,4 +78,3 @@ export function GeminiChat() {
     </>
   )
 }
-
