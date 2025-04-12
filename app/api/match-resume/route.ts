@@ -1,6 +1,5 @@
 import { type NextRequest, NextResponse } from "next/server"
-import { parseResume, parseJobDescription } from "@/lib/resume-parser"
-import { analysisCache } from "@/lib/cache"
+import { parseJobDescription } from "@/lib/resume-parser"
 import pdfParse from "pdf-parse"
 import { GoogleGenerativeAI } from "@google/generative-ai"
 
@@ -19,17 +18,6 @@ export async function POST(req: NextRequest) {
 
     const parsed = await pdfParse(buffer)
     const resumeText = parsed.text
-
-    // Create a cache key that includes job description if provided
-    const cacheKey = jobDescription
-      ? `${resumeText.substring(0, 100)}-${jobDescription.substring(0, 100)}`
-      : resumeText.substring(0, 100)
-
-    const cachedResult = analysisCache.get(cacheKey, "comprehensive")
-    if (cachedResult) {
-      console.log("Returning cached comprehensive result")
-      return NextResponse.json(cachedResult)
-    }
 
     // Build the prompt for the Gemini API
     let prompt = ""
@@ -205,7 +193,6 @@ ${resumeText}
         modelUsed: "gemini-1.5-flash",
       }
 
-      analysisCache.set(cacheKey, "comprehensive", finalResult)
       return NextResponse.json(finalResult)
     } catch (error: any) {
       console.error("Error parsing Gemini response:", error)
