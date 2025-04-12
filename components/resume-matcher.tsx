@@ -60,6 +60,7 @@ export function ResumeMatcher() {
   const [resumeFile, setResumeFile] = useState<File | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errorDetails, setErrorDetails] = useState<string | null>(null)
   const [result, setResult] = useState<MatchResult | null>(null)
   const [processingTime, setProcessingTime] = useState<number | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -89,6 +90,7 @@ export function ResumeMatcher() {
       ) {
         setResumeFile(file)
         setError(null)
+        setErrorDetails(null)
       } else {
         setError("Please upload a PDF, TXT, or DOCX file")
         setResumeFile(null)
@@ -106,6 +108,7 @@ export function ResumeMatcher() {
 
     setIsLoading(true)
     setError(null)
+    setErrorDetails(null)
     setResult(null)
     setProcessingTime(null)
 
@@ -119,46 +122,115 @@ export function ResumeMatcher() {
         formData.append("jobDescription", jobDescription)
       }
 
+      console.log("Submitting form data...")
+
+      // First, check if the API is available at all
+      try {
+        const healthCheck = await fetch("/api/health")
+        if (!healthCheck.ok) {
+          throw new Error(`API health check failed with status: ${healthCheck.status}`)
+        }
+        console.log("API health check passed")
+      } catch (healthError: any) {
+        console.error("API health check failed:", healthError)
+        throw new Error(`API unavailable: ${healthError.message}`)
+      }
+
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 1200000) // 20 minute timeout
+      const timeoutId = setTimeout(() => controller.abort(), 60000) // 1 minute timeout (reduced for testing)
 
-      const response = await fetch("/api/match-resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: formData,
-        signal: controller.signal,
-      })
+      try {
+        console.log("Sending request to /api/match-resume...")
+        const response = await fetch("/api/match-resume", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        })
 
-      clearTimeout(timeoutId)
+        const endTime = Date.now()
+        setProcessingTime(endTime - startTime)
 
-      const endTime = Date.now()
-      setProcessingTime(endTime - startTime)
+        console.log("Response status:", response.status)
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || `Server responded with ${response.status}`)
-      }
+        // Create a fallback result in case parsing fails
+        const fallbackResult: MatchResult = {
+          matchPercentage: 0,
+          matchedSkills: [],
+          missingSkills: [],
+          suggestions: ["Try again later"],
+          explanation: "There was an error processing your request. Please try again.",
+          companies: [],
+          jobs: [],
+          parsingError: true,
+        }
 
-      const data = await response.json()
+        if (!response.ok) {
+          // Try to get error details from the response
+          let errorMessage = `Server responded with status: ${response.status}`
+          let errorDetails = null
 
-      if (data.error) {
-        throw new Error(data.error)
-      }
+          try {
+            const errorData = await response.json()
+            if (errorData.error) {
+              errorMessage = errorData.error
+              errorDetails = errorData.details || null
+            }
+          } catch (parseError) {
+            // If we can't parse the error response, just use the status code
+            console.error("Could not parse error response:", parseError)
+          }
 
-      setResult(data)
+          setError(errorMessage)
+          if (errorDetails) setErrorDetails(errorDetails)
+          return
+        }
 
-      // If no job description was provided, switch to companies tab
-      if (!jobDescription.trim()) {
-        setActiveTab("companies")
+        let responseText
+        try {
+          responseText = await response.text()
+          console.log("Response text length:", responseText.length)
+          console.log("Response text preview:", responseText.substring(0, 100))
+        } catch (textError) {
+          console.error("Error reading response text:", textError)
+          throw new Error("Failed to read server response")
+        }
+
+        let data
+        try {
+          data = JSON.parse(responseText)
+          console.log("Successfully parsed JSON response")
+        } catch (jsonError) {
+          console.error("JSON parse error:", jsonError)
+          console.error("Response text:", responseText)
+          throw new Error(`Failed to parse response as JSON. Server returned: ${responseText.substring(0, 100)}`)
+        }
+
+        // Handle error in the data
+        if (data.error) {
+          setErrorDetails(data.details || "No additional details available")
+          throw new Error(data.error)
+        }
+
+        // If we got this far, set the result
+        setResult(data)
+
+        // If no job description was provided, switch to companies tab
+        if (!jobDescription.trim()) {
+          setActiveTab("companies")
+        }
+      } catch (fetchError: any) {
+        console.error("Fetch error:", fetchError)
+        throw new Error(`Network error: ${fetchError.message || "Failed to connect to server"}`)
+      } finally {
+        clearTimeout(timeoutId)
       }
     } catch (err: any) {
       if (err.name === "AbortError") {
-        setError(
-          "Request timed out. Try with a shorter resume or job description, or check if Ollama is running properly.",
-        )
+        setError("Request timed out. Try with a shorter resume or job description, or check if the API is responding.")
       } else {
         setError(err.message || "Failed to analyze resume")
       }
+      console.error("Error analyzing resume:", err)
     } finally {
       setIsLoading(false)
     }
@@ -172,36 +244,81 @@ export function ResumeMatcher() {
 
     setIsGeneratingAltered(true)
     setAlteredResume(null)
+    setError(null)
+    setErrorDetails(null)
 
     try {
       const formData = new FormData()
       formData.append("resume", resumeFile)
       formData.append("jobDescription", jobDescription)
 
+      console.log("Sending request to /api/alter-resume...")
+
       const controller = new AbortController()
-      const timeoutId = setTimeout(() => controller.abort(), 600000) // 10 minute timeout
+      const timeoutId = setTimeout(() => controller.abort(), 60000) // 1 minute timeout
 
-      const response = await fetch("/api/alter-resume", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: formData,
-        signal: controller.signal,
-      })
+      try {
+        const response = await fetch("/api/alter-resume", {
+          method: "POST",
+          body: formData,
+          signal: controller.signal,
+        })
 
-      clearTimeout(timeoutId)
+        console.log("Response status:", response.status)
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.error || `Server responded with ${response.status}`)
+        if (!response.ok) {
+          // Try to get error details from the response
+          let errorMessage = `Server responded with status: ${response.status}`
+          let errorDetails = null
+
+          try {
+            const errorData = await response.json()
+            if (errorData.error) {
+              errorMessage = errorData.error
+              errorDetails = errorData.details || null
+            }
+          } catch (parseError) {
+            // If we can't parse the error response, just use the status code
+            console.error("Could not parse error response:", parseError)
+          }
+
+          setError(errorMessage)
+          if (errorDetails) setErrorDetails(errorDetails)
+          return
+        }
+
+        let responseText
+        try {
+          responseText = await response.text()
+          console.log("Response text length:", responseText.length)
+          console.log("Response text preview:", responseText.substring(0, 100))
+        } catch (textError) {
+          console.error("Error reading response text:", textError)
+          throw new Error("Failed to read server response")
+        }
+
+        let data
+        try {
+          data = JSON.parse(responseText)
+          console.log("Successfully parsed JSON response")
+        } catch (jsonError) {
+          console.error("JSON parse error:", jsonError)
+          console.error("Response text:", responseText)
+          throw new Error(`Failed to parse response as JSON. Server returned: ${responseText.substring(0, 100)}`)
+        }
+
+        if (data.error) {
+          setErrorDetails(data.details || "No additional details available")
+          throw new Error(data.error)
+        }
+
+        setAlteredResume(data.alteredResume)
+      } catch (fetchError: any) {
+        console.error("Fetch error:", fetchError)
+        throw new Error(`Network error: ${fetchError.message || "Failed to connect to server"}`)
+      } finally {
+        clearTimeout(timeoutId)
       }
-
-      const data = await response.json()
-
-      if (data.error) {
-        throw new Error(data.error)
-      }
-
-      setAlteredResume(data.alteredResume)
     } catch (err: any) {
       if (err.name === "AbortError") {
         setError("Resume alteration timed out. Try again with a shorter resume or job description.")
@@ -221,19 +338,35 @@ export function ResumeMatcher() {
     }
 
     setIsDownloading(true)
+    setError(null)
+    setErrorDetails(null)
 
     try {
       // Set a loading state if needed
-      const response = await fetch("/api/generate-pdf", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ resumeText: alteredResume }),
-      })
+      let response
+      try {
+        response = await fetch("/api/generate-pdf", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ resumeText: alteredResume }),
+        })
+      } catch (fetchError: any) {
+        console.error("Fetch error:", fetchError)
+        throw new Error(`Network error: ${fetchError.message || "Failed to connect to server"}`)
+      }
 
+      // For PDF, we don't expect JSON
       if (!response.ok) {
-        throw new Error(`Failed to generate PDF: ${response.status}`)
+        // Try to parse as JSON for error details if possible
+        try {
+          const errorData = await response.json()
+          throw new Error(errorData.error || `Failed to generate PDF: ${response.status}`)
+        } catch (jsonError) {
+          // If not JSON, just use status
+          throw new Error(`Failed to generate PDF: ${response.status}`)
+        }
       }
 
       // Create a blob from the PDF data
@@ -315,7 +448,10 @@ export function ResumeMatcher() {
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertTitle>Error</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
+                <AlertDescription className="space-y-2">
+                  <p>{error}</p>
+                  {errorDetails && <p className="text-xs opacity-80">{errorDetails}</p>}
+                </AlertDescription>
               </Alert>
             )}
           </form>
@@ -346,6 +482,10 @@ export function ResumeMatcher() {
                 <h3 className="text-sm font-medium">Processing</h3>
               </div>
               <Progress value={undefined} className="h-2" />
+            </div>
+
+            <div className="space-y-4">
+              <Skeleton className="h-4" />
             </div>
 
             <div className="space-y-4">
@@ -492,44 +632,57 @@ export function ResumeMatcher() {
                         </CollapsibleTrigger>
                       </div>
                       <CollapsibleContent className="mt-2 space-y-4">
-  <p className="text-sm">
-    Would you like to see an altered resume optimized for this job description?
-  </p>
-  <div className="flex gap-2">
-    <Button variant="outline" size="sm" onClick={() => setIsAlterSectionOpen(false)}>
-      No
-    </Button>
-    {!alteredResume && (
-      <Button size="sm" onClick={handleGenerateAltered} disabled={isGeneratingAltered}>
-        {isGeneratingAltered ? (
-          <>
-            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-            Generating...
-          </>
-        ) : (
-          "Yes"
-        )}
-      </Button>
-    )}
-  </div>
+                        <p className="text-sm">
+                          Would you like to see an altered resume optimized for this job description?
+                        </p>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setIsAlterSectionOpen(false)}>
+                            No
+                          </Button>
+                          {!alteredResume && (
+                            <Button size="sm" onClick={handleGenerateAltered} disabled={isGeneratingAltered}>
+                              {isGeneratingAltered ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Generating...
+                                </>
+                              ) : (
+                                "Yes"
+                              )}
+                            </Button>
+                          )}
+                        </div>
 
-  {alteredResume && (
-    <div className="mt-4 p-4 bg-muted rounded-md">
-      <p className="text-sm font-medium mb-2">Preview of Optimized Resume:</p>
-      <div className="max-h-[200px] overflow-y-auto text-sm">
-        {alteredResume.split("\n\n").map((paragraph, i) => (
-          <p key={i} className="mb-2">
-            {paragraph}
-          </p>
-        ))}
-      </div>
-      <p className="text-xs text-muted-foreground mt-2">
-        The optimized resume highlights your relevant skills and experience for this specific job description.
-      </p>
-    </div>
-  )}
-</CollapsibleContent>
-
+                        {alteredResume && (
+                          <div className="mt-4 p-4 bg-muted rounded-md">
+                            <p className="text-sm font-medium mb-2">Preview of Optimized Resume:</p>
+                            <div className="max-h-[200px] overflow-y-auto text-sm">
+                              {alteredResume.split("\n\n").map((paragraph, i) => (
+                                <p key={i} className="mb-2">
+                                  {paragraph}
+                                </p>
+                              ))}
+                            </div>
+                            <p className="text-xs text-muted-foreground mt-2">
+                              The optimized resume highlights your relevant skills and experience for this specific job
+                              description.
+                            </p>
+                            <Button size="sm" className="mt-4" onClick={handleDownloadAltered} disabled={isDownloading}>
+                              {isDownloading ? (
+                                <>
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                  Downloading...
+                                </>
+                              ) : (
+                                <>
+                                  <FileDown className="mr-2 h-4 w-4" />
+                                  Download as PDF
+                                </>
+                              )}
+                            </Button>
+                          </div>
+                        )}
+                      </CollapsibleContent>
                     </Collapsible>
                   )}
                 </Card>
